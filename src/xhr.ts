@@ -1,9 +1,10 @@
 import { AxiosRequestConfig, AxiosResponse, AxiosPromise } from './types'
 import { parseHeaders } from './helpers/header'
+import { createError } from './helpers/Error'
 
 export default function xhr(config: AxiosRequestConfig): AxiosPromise {
   return new Promise((resolve, reject) => {
-    const { data = null, url, method = 'get', headers = {}, responseType } = config
+    const { data = null, url, method = 'get', headers = {}, responseType, timeout } = config
 
     const request = new XMLHttpRequest()
 
@@ -11,10 +12,16 @@ export default function xhr(config: AxiosRequestConfig): AxiosPromise {
       request.responseType = responseType
     }
 
-    request.open(method.toUpperCase(), url, true)
+    if (timeout) {
+      request.timeout = timeout
+    }
+
+    request.open(method.toUpperCase(), url!, true)
 
     request.onreadystatechange = function handleLoad() {
       if (request.readyState !== 4) return
+
+      if (request.status === 0) return
 
       const responseHeaders = parseHeaders(request.getAllResponseHeaders())
       const responseData = responseType !== 'text' ? request.response : request.responseText
@@ -26,7 +33,15 @@ export default function xhr(config: AxiosRequestConfig): AxiosPromise {
         config,
         request
       }
-      resolve(response)
+      handlerResponse(response)
+    }
+
+    request.onerror = function handleError() {
+      reject(createError('Network Error', config, null, request))
+    }
+
+    request.ontimeout = function handlerTimeout() {
+      reject(createError(`Timeout of ${timeout} ms exceeded`, config, 'ECONNABORTED', request))
     }
 
     /**
@@ -45,5 +60,15 @@ export default function xhr(config: AxiosRequestConfig): AxiosPromise {
     })
 
     request.send(data)
+
+    function handlerResponse(res: AxiosResponse): void {
+      if (res.status >= 200 && res.status < 300) {
+        resolve(res)
+      } else {
+        reject(
+          createError(`Request faild with status code ${res.status}`, config, null, request, res)
+        )
+      }
+    }
   })
 }
